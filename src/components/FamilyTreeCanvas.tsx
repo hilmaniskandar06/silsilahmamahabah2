@@ -16,7 +16,7 @@ import {
   Edge
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Lock, Moon, Download, Focus, CloudUpload } from 'lucide-react';
+import { Search, Lock, Moon, Download, Focus, CloudUpload, BarChart2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
 
@@ -67,6 +67,7 @@ function FlowCanvas() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isDbLoading, setIsDbLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
@@ -267,6 +268,33 @@ function FlowCanvas() {
     }, 500);
   }, [nodes, edges, isLoaded]);
 
+  // Supabase Realtime — sync perubahan dari device lain
+  useEffect(() => {
+    const channel = supabase
+      .channel('trees-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'trees', filter: 'id=eq.default' },
+        (payload) => {
+          // Hanya update jika bukan kita sendiri yang menyimpan
+          if (isSaving) return;
+          const newNodes = (payload.new as { nodes: Node[]; edges: Edge[] }).nodes as Node[];
+          const newEdges = (payload.new as { nodes: Node[]; edges: Edge[] }).edges as Edge[];
+          if (newNodes && newEdges) {
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(newNodes, newEdges);
+            setNodes(layoutedNodes);
+            setEdges(layoutedEdges);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSaving]);
+
   const onRecenter = useCallback(() => {
     // Recenter visually means fitting the view to show all or focus on root
     fitView({ duration: 800, padding: 0.5 });
@@ -408,24 +436,37 @@ function FlowCanvas() {
         <button className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title="Unduh Kanvas" onClick={handleDownload}>
           <Download className="w-5 h-5" />
         </button>
-        <button 
-          className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-indigo-900/50 text-indigo-400' : 'hover:bg-indigo-50 text-indigo-600'}`} 
-          title="Recenter" 
+        {/* Tombol Statistik */}
+        <div className="relative">
+          <button
+            className={`p-2 rounded-lg transition-colors ${isStatsOpen ? (isDarkMode ? 'text-emerald-400 bg-emerald-900/50' : 'text-emerald-600 bg-emerald-50') : (isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600')}`}
+            title="Statistik Keluarga"
+            onClick={() => setIsStatsOpen(v => !v)}
+          >
+            <BarChart2 className="w-5 h-5" />
+          </button>
+          {/* Stats Dropdown */}
+          {isStatsOpen && (
+            <div className={`absolute right-0 top-11 w-52 rounded-2xl shadow-2xl p-4 text-sm z-50 border ${isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-300' : 'bg-white border-gray-100 text-gray-700'}`}>
+              <h3 className={`font-bold border-b pb-2 mb-2 ${isDarkMode ? 'border-gray-700 text-gray-100' : 'border-gray-100 text-gray-800'}`}>Statistik Keluarga</h3>
+              <div className="flex justify-between py-1"><span>Total Anggota:</span><span className={`font-semibold ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>{stats.total}</span></div>
+              <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Anak (Gen 1):</span><span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.anak}</span></div>
+              <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Menantu:</span><span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.menantu}</span></div>
+              <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Cucu (Gen 2):</span><span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.cucu}</span></div>
+              <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Cicit+ (Gen 3+):</span><span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.cicit}</span></div>
+            </div>
+          )}
+        </div>
+        <button
+          className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-indigo-900/50 text-indigo-400' : 'hover:bg-indigo-50 text-indigo-600'}`}
+          title="Recenter"
           onClick={onRecenter}
         >
           <Focus className="w-5 h-5" />
         </button>
       </Panel>
 
-      {/* Bottom Left Panel: Stats */}
-      <Panel position="bottom-left" className={`${isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-300 shadow-gray-900' : 'bg-white border-gray-100 text-gray-700 shadow-md'} p-4 rounded-xl min-w-[200px] text-sm ml-2 mb-2`}>
-        <h3 className={`font-bold border-b pb-2 mb-2 ${isDarkMode ? 'border-gray-700 text-gray-100' : 'border-gray-100 text-gray-800'}`}>Statistik Keluarga</h3>
-        <div className="flex justify-between py-1"><span>Total Anggota:</span> <span className={`font-semibold ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>{stats.total}</span></div>
-        <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Anak (Gen 1):</span> <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.anak}</span></div>
-        <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Menantu (Gen 1):</span> <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.menantu}</span></div>
-        <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Cucu (Gen 2):</span> <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.cucu}</span></div>
-        <div className={`flex justify-between py-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}><span>Cicit+ (Gen 3+):</span> <span className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{stats.cicit}</span></div>
-      </Panel>
+      {/* Bottom Left Panel: Stats REMOVED — now a button in top panel */}
 
       <BiodataPanel 
         person={selectedPerson}
