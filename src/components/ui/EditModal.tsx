@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { X, Upload, Trash2, Save } from 'lucide-react';
-import { Person } from '@/types/family';
+import { X, Upload, Trash2, Save, Loader2 } from 'lucide-react';
+import { Person, Gender } from '@/types/family';
 import { PhotoCropper } from './PhotoCropper';
+import { supabase } from '@/lib/supabase';
 
 interface EditModalProps {
   person: Person | null;
@@ -12,25 +13,19 @@ interface EditModalProps {
 }
 
 export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditModalProps) {
-  const [formData, setFormData] = useState<Person | null>(person ? { ...person } : null);
-  const [prevPerson, setPrevPerson] = useState<Person | null>(person);
+  if (!isOpen || !person) return null;
+
+  const [formData, setFormData] = useState<Person>({ ...person });
   const [photoToCrop, setPhotoToCrop] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  if (person !== prevPerson) {
-    setPrevPerson(person);
-    setFormData(person ? { ...person } : null);
-  }
-
-  if (!isOpen || !person || !formData) return null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => prev ? ({ ...prev, [name]: value }) : null);
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleClear = () => {
-    if (!person) return;
     setFormData({
       ...person,
       name: '',
@@ -42,8 +37,39 @@ export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditM
   };
 
   const handleSave = () => {
-    if (formData) {
-      onSave(formData);
+    onSave(formData);
+  };
+
+  // Upload cropped base64 image to Supabase Storage
+  const handleCroppedPhoto = async (croppedBase64: string) => {
+    setPhotoToCrop(null);
+    setIsUploadingPhoto(true);
+    try {
+      // Convert base64 to Blob
+      const res = await fetch(croppedBase64);
+      const blob = await res.blob();
+      const ext = blob.type.split('/')[1] || 'jpg';
+      const fileName = `${person.id}_${Date.now()}.${ext}`;
+
+      // Upload to Supabase Storage bucket 'photos'
+      const { error: uploadError } = await supabase.storage
+        .from('photos')
+        .upload(fileName, blob, { upsert: true, contentType: blob.type });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('photos')
+        .getPublicUrl(fileName);
+
+      setFormData(prev => ({ ...prev, photoUrl: urlData.publicUrl }));
+    } catch (err) {
+      console.error('Gagal upload foto:', err);
+      // Fallback: simpan base64 jika upload gagal
+      setFormData(prev => ({ ...prev, photoUrl: croppedBase64 }));
+    } finally {
+      setIsUploadingPhoto(false);
     }
   };
 
@@ -75,8 +101,13 @@ export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditM
           <div className="p-6 overflow-y-auto flex-1 space-y-5">
             {/* Photo Upload */}
             <div className="flex flex-col items-center gap-3">
-              <div className={`w-24 h-24 rounded-full border-2 border-dashed ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-300 bg-gray-50'} flex items-center justify-center overflow-hidden relative group cursor-pointer`} onClick={() => fileInputRef.current?.click()}>
-                {formData?.photoUrl ? (
+              <div className={`w-24 h-24 rounded-full border-2 border-dashed ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-300 bg-gray-50'} flex items-center justify-center overflow-hidden relative group cursor-pointer`} onClick={() => !isUploadingPhoto && fileInputRef.current?.click()}>
+                {isUploadingPhoto ? (
+                  <div className="flex flex-col items-center gap-1 text-indigo-500">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span className="text-xs">Mengunggah...</span>
+                  </div>
+                ) : formData.photoUrl ? (
                   <>
                     <img src={formData.photoUrl} alt="Preview" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -150,10 +181,7 @@ export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditM
         <PhotoCropper 
           imageSrc={photoToCrop} 
           onCancel={() => setPhotoToCrop(null)} 
-          onSave={(croppedUrl) => {
-            setFormData(prev => prev ? ({ ...prev, photoUrl: croppedUrl }) : null);
-            setPhotoToCrop(null);
-          }} 
+          onSave={handleCroppedPhoto}
         />
       )}
     </>

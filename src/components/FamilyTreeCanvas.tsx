@@ -1,23 +1,24 @@
 'use client';
 
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   MiniMap,
   Controls,
   Background,
+  BackgroundVariant,
   useNodesState,
   useEdgesState,
   Panel,
   useReactFlow,
   ReactFlowProvider,
   Node,
-  Edge,
-  BackgroundVariant
+  Edge
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Lock, Moon, Download, Focus } from 'lucide-react';
+import { Search, Lock, Moon, Download, Focus, CloudUpload } from 'lucide-react';
 import { toPng } from 'html-to-image';
+import { supabase } from '@/lib/supabase';
 
 import { PersonNode } from './nodes/PersonNode';
 import { CustomEdge } from './edges/CustomEdge';
@@ -25,7 +26,6 @@ import { getLayoutedElements } from '@/utils/layout';
 import { Person } from '@/types/family';
 import { BiodataPanel } from './ui/BiodataPanel';
 import { EditModal } from './ui/EditModal';
-import { supabase } from '@/lib/supabase';
 
 const nodeTypes = {
   person: PersonNode,
@@ -65,8 +65,9 @@ function FlowCanvas() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isFetching, setIsFetching] = useState(true);
+  const [isDbLoading, setIsDbLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
   
@@ -158,7 +159,7 @@ function FlowCanvas() {
     if (window.confirm('Yakin ingin menghapus anggota ini beserta seluruh keturunan dan pasangannya?')) {
       const getSubTreeIds = (startId: string, allEdges: Edge[]): string[] => {
         const idsToDelete = new Set<string>([startId]);
-        const queue = [startId];
+        let queue = [startId];
         
         while (queue.length > 0) {
           const current = queue.shift()!;
@@ -200,30 +201,30 @@ function FlowCanvas() {
     }
   };
 
+  // Load from Supabase on mount
   useEffect(() => {
-    const fetchData = async () => {
+    const loadFromSupabase = async () => {
+      setIsDbLoading(true);
       try {
-        setIsFetching(true);
         const { data, error } = await supabase
-          .from('tree_data')
+          .from('trees')
           .select('nodes, edges')
-          .eq('id', 'main')
+          .eq('id', 'default')
           .single();
 
-        let startNodes = initialNodes;
-        let startEdges = initialEdges;
+        let startNodes: Node[] = initialNodes;
+        let startEdges: Edge[] = initialEdges;
 
-        if (data && !error) {
-          startNodes = data.nodes;
-          startEdges = data.edges;
-        } else if (error && error.code !== 'PGRST116') { // PGRST116 is multiple/no rows
-          console.error('Error fetching data from Supabase:', error);
+        if (!error && data) {
+          const dbNodes = data.nodes as Node[];
+          const dbEdges = data.edges as Edge[];
+          if (dbNodes && dbNodes.length > 0) {
+            startNodes = dbNodes;
+            startEdges = dbEdges || [];
+          }
         }
 
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-          startNodes,
-          startEdges
-        );
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(startNodes, startEdges);
         setNodes(layoutedNodes);
         setEdges(layoutedEdges);
         setIsLoaded(true);
@@ -232,43 +233,39 @@ function FlowCanvas() {
           fitView({ duration: 800, padding: 0.5 });
         }, 100);
       } catch (err) {
-        console.error('Unexpected error fetching data:', err);
+        console.error('Error loading from Supabase:', err);
+        // Fallback to initial data
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(initialNodes, initialEdges);
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
+        setIsLoaded(true);
       } finally {
-        setIsFetching(false);
+        setIsDbLoading(false);
       }
     };
-    
-    fetchData();
+    loadFromSupabase();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-save to Supabase with debounce (500ms)
   useEffect(() => {
-    if (!isLoaded || isFetching) return;
+    if (!isLoaded) return;
 
-    const saveData = async () => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(async () => {
       setIsSaving(true);
       try {
-        const { error } = await supabase
-          .from('tree_data')
-          .upsert({ id: 'main', nodes, edges, updated_at: new Date().toISOString() });
-          
-        if (error) {
-          console.error('Error saving data to Supabase:', error);
-        }
+        await supabase
+          .from('trees')
+          .upsert({ id: 'default', nodes, edges, updated_at: new Date().toISOString() });
       } catch (err) {
-        console.error('Unexpected error saving data:', err);
+        console.error('Error saving to Supabase:', err);
       } finally {
         setIsSaving(false);
       }
-    };
-
-    // Auto save dengan jeda waktu agar tidak membanjiri database
-    const timer = setTimeout(() => {
-      saveData();
-    }, 1500);
-
-    return () => clearTimeout(timer);
-  }, [nodes, edges, isLoaded, isFetching]);
+    }, 500);
+  }, [nodes, edges, isLoaded]);
 
   const onRecenter = useCallback(() => {
     // Recenter visually means fitting the view to show all or focus on root
@@ -276,15 +273,15 @@ function FlowCanvas() {
   }, [fitView]);
 
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    setSelectedPerson(node.data as Person);
+    setSelectedPerson(node.data as unknown as Person);
     setIsBiodataOpen(true);
   }, []);
 
   const handleSavePerson = (updatedPerson: Person) => {
-    setNodes(nds => 
+    setNodes(nds =>
       nds.map(n => {
         if (n.id === updatedPerson.id) {
-          return { ...n, data: updatedPerson };
+          return { ...n, data: { ...n.data, ...updatedPerson } };
         }
         return n;
       })
@@ -316,7 +313,7 @@ function FlowCanvas() {
     const rootNodes = nodes.filter(n => !childTargets.has(n.id) && !partnerTargets.has(n.id));
 
     rootNodes.forEach(n => nodeGens.set(n.id, 0));
-    const queue = rootNodes.map(n => n.id);
+    let queue = rootNodes.map(n => n.id);
 
     while (queue.length > 0) {
       const current = queue.shift()!;
@@ -346,7 +343,7 @@ function FlowCanvas() {
     let pasangan = 0;
 
     nodes.forEach(n => {
-      const p = n.data as Person;
+      const p = n.data as unknown as Person;
       if (p.relationType === 'partner') pasangan++;
       
       const gen = nodeGens.get(n.id);
@@ -364,6 +361,23 @@ function FlowCanvas() {
   }, [nodes, edges]);
 
   return (
+    <div className="w-full h-full relative">
+      {/* Full-screen loading overlay */}
+      {isDbLoading && (
+        <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+          <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Memuat data silsilah...</p>
+        </div>
+      )}
+
+      {/* Saving indicator */}
+      {isSaving && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-indigo-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg">
+          <CloudUpload className="w-3.5 h-3.5 animate-pulse" />
+          Menyimpan...
+        </div>
+      )}
+
     <ReactFlow
       nodes={nodesWithProps}
       edges={edges}
@@ -381,16 +395,7 @@ function FlowCanvas() {
       <MiniMap />
       
       {/* Top Right Panel: Actions */}
-      <Panel position="top-right" className={`${isDarkMode ? 'bg-gray-800 border-gray-700 shadow-gray-900' : 'bg-white border-gray-100 shadow-md'} p-2 rounded-xl flex items-center gap-2 mr-2 mt-2`}>
-        {isFetching ? (
-          <span className={`px-2 text-xs font-medium animate-pulse ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Memuat...</span>
-        ) : isSaving ? (
-          <span className={`px-2 text-xs font-medium text-yellow-600`}>Menyimpan...</span>
-        ) : (
-          <span className={`px-2 text-xs font-medium text-green-600`}>Tersimpan</span>
-        )}
-        <div className={`w-px h-6 mx-1 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
-
+      <Panel position="top-right" className={`${isDarkMode ? 'bg-gray-800 border-gray-700 shadow-gray-900' : 'bg-white border-gray-100 shadow-md'} p-2 rounded-xl flex gap-2 mr-2 mt-2`}>
         <button className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title="Cari" onClick={handleSearch}>
           <Search className="w-5 h-5" />
         </button>
@@ -441,6 +446,7 @@ function FlowCanvas() {
         onSave={handleSavePerson}
       />
     </ReactFlow>
+    </div>
   );
 }
 

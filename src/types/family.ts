@@ -10,9 +10,9 @@ export interface Person {
   photoUrl?: string | null;
   address?: string;
   relationType: RelationType;
-  parents: string[]; // Array of Person IDs
-  children: string[]; // Array of Person IDs
-  spouses: string[]; // Array of Person IDs
+  parents: string[];
+  children: string[];
+  spouses: string[];
   [key: string]: unknown;
 }
 
