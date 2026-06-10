@@ -9,12 +9,22 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.0",
+    "@xyflow/react": "^12.11.0",
+    "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
+    "date-fns": "^4.4.0",
+    "html-to-image": "^1.11.13",
+    "lucide-react": "^1.17.0",
     "next": "16.2.7",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-easy-crop": "^5.5.7",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/dagre": "^0.7.54",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
