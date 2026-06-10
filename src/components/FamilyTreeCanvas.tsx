@@ -24,6 +24,7 @@ import { getLayoutedElements } from '@/utils/layout';
 import { Person } from '@/types/family';
 import { BiodataPanel } from './ui/BiodataPanel';
 import { EditModal } from './ui/EditModal';
+import { supabase } from '@/lib/supabase';
 
 const nodeTypes = {
   person: PersonNode,
@@ -63,6 +64,8 @@ function FlowCanvas() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
   
@@ -197,40 +200,74 @@ function FlowCanvas() {
   };
 
   useEffect(() => {
-    const savedNodes = localStorage.getItem('familyTreeNodes');
-    const savedEdges = localStorage.getItem('familyTreeEdges');
-    let startNodes = initialNodes;
-    let startEdges = initialEdges;
-
-    if (savedNodes && savedEdges) {
+    const fetchData = async () => {
       try {
-        startNodes = JSON.parse(savedNodes);
-        startEdges = JSON.parse(savedEdges);
-      } catch (e) {
-        console.error('Failed to parse local storage data', e);
+        setIsFetching(true);
+        const { data, error } = await supabase
+          .from('tree_data')
+          .select('nodes, edges')
+          .eq('id', 'main')
+          .single();
+
+        let startNodes = initialNodes;
+        let startEdges = initialEdges;
+
+        if (data && !error) {
+          startNodes = data.nodes;
+          startEdges = data.edges;
+        } else if (error && error.code !== 'PGRST116') { // PGRST116 is multiple/no rows
+          console.error('Error fetching data from Supabase:', error);
+        }
+
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+          startNodes,
+          startEdges
+        );
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
+        setIsLoaded(true);
+
+        setTimeout(() => {
+          fitView({ duration: 800, padding: 0.5 });
+        }, 100);
+      } catch (err) {
+        console.error('Unexpected error fetching data:', err);
+      } finally {
+        setIsFetching(false);
       }
-    }
-
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      startNodes,
-      startEdges
-    );
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
-    setIsLoaded(true);
-
-    setTimeout(() => {
-      fitView({ duration: 800, padding: 0.5 });
-    }, 100);
+    };
+    
+    fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem('familyTreeNodes', JSON.stringify(nodes));
-      localStorage.setItem('familyTreeEdges', JSON.stringify(edges));
-    }
-  }, [nodes, edges, isLoaded]);
+    if (!isLoaded || isFetching) return;
+
+    const saveData = async () => {
+      setIsSaving(true);
+      try {
+        const { error } = await supabase
+          .from('tree_data')
+          .upsert({ id: 'main', nodes, edges, updated_at: new Date().toISOString() });
+          
+        if (error) {
+          console.error('Error saving data to Supabase:', error);
+        }
+      } catch (err) {
+        console.error('Unexpected error saving data:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    // Auto save dengan jeda waktu agar tidak membanjiri database
+    const timer = setTimeout(() => {
+      saveData();
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [nodes, edges, isLoaded, isFetching]);
 
   const onRecenter = useCallback(() => {
     // Recenter visually means fitting the view to show all or focus on root
@@ -343,7 +380,16 @@ function FlowCanvas() {
       <MiniMap />
       
       {/* Top Right Panel: Actions */}
-      <Panel position="top-right" className={`${isDarkMode ? 'bg-gray-800 border-gray-700 shadow-gray-900' : 'bg-white border-gray-100 shadow-md'} p-2 rounded-xl flex gap-2 mr-2 mt-2`}>
+      <Panel position="top-right" className={`${isDarkMode ? 'bg-gray-800 border-gray-700 shadow-gray-900' : 'bg-white border-gray-100 shadow-md'} p-2 rounded-xl flex items-center gap-2 mr-2 mt-2`}>
+        {isFetching ? (
+          <span className={`px-2 text-xs font-medium animate-pulse ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Memuat...</span>
+        ) : isSaving ? (
+          <span className={`px-2 text-xs font-medium text-yellow-600`}>Menyimpan...</span>
+        ) : (
+          <span className={`px-2 text-xs font-medium text-green-600`}>Tersimpan</span>
+        )}
+        <div className={`w-px h-6 mx-1 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}></div>
+
         <button className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title="Cari" onClick={handleSearch}>
           <Search className="w-5 h-5" />
         </button>
