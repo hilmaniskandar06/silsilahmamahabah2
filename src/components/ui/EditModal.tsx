@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, Trash2, Save } from 'lucide-react';
-import { Person, Gender } from '@/types/family';
+import { Person } from '@/types/family';
 import { PhotoCropper } from './PhotoCropper';
 
 interface EditModalProps {
@@ -12,18 +12,25 @@ interface EditModalProps {
 }
 
 export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditModalProps) {
-  if (!isOpen || !person) return null;
-
-  const [formData, setFormData] = useState<Person>({ ...person });
+  const [formData, setFormData] = useState<Person | null>(person ? { ...person } : null);
+  const [prevPerson, setPrevPerson] = useState<Person | null>(person);
   const [photoToCrop, setPhotoToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  if (person !== prevPerson) {
+    setPrevPerson(person);
+    setFormData(person ? { ...person } : null);
+  }
+
+  if (!isOpen || !person || !formData) return null;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => prev ? ({ ...prev, [name]: value }) : null);
   };
 
   const handleClear = () => {
+    if (!person) return;
     setFormData({
       ...person,
       name: '',
@@ -35,7 +42,9 @@ export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditM
   };
 
   const handleSave = () => {
-    onSave(formData);
+    if (formData) {
+      onSave(formData);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -67,7 +76,7 @@ export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditM
             {/* Photo Upload */}
             <div className="flex flex-col items-center gap-3">
               <div className={`w-24 h-24 rounded-full border-2 border-dashed ${isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-300 bg-gray-50'} flex items-center justify-center overflow-hidden relative group cursor-pointer`} onClick={() => fileInputRef.current?.click()}>
-                {formData.photoUrl ? (
+                {formData?.photoUrl ? (
                   <>
                     <img src={formData.photoUrl} alt="Preview" className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -142,7 +151,7 @@ export function EditModal({ person, isOpen, isDarkMode, onClose, onSave }: EditM
           imageSrc={photoToCrop} 
           onCancel={() => setPhotoToCrop(null)} 
           onSave={(croppedUrl) => {
-            setFormData(prev => ({ ...prev, photoUrl: croppedUrl }));
+            setFormData(prev => prev ? ({ ...prev, photoUrl: croppedUrl }) : null);
             setPhotoToCrop(null);
           }} 
         />

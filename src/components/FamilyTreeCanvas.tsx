@@ -158,7 +158,7 @@ function FlowCanvas() {
     if (window.confirm('Yakin ingin menghapus anggota ini beserta seluruh keturunan dan pasangannya?')) {
       const getSubTreeIds = (startId: string, allEdges: Edge[]): string[] => {
         const idsToDelete = new Set<string>([startId]);
-        let queue = [startId];
+        const queue = [startId];
         
         while (queue.length > 0) {
           const current = queue.shift()!;
@@ -316,7 +316,7 @@ function FlowCanvas() {
     const rootNodes = nodes.filter(n => !childTargets.has(n.id) && !partnerTargets.has(n.id));
 
     rootNodes.forEach(n => nodeGens.set(n.id, 0));
-    let queue = rootNodes.map(n => n.id);
+    const queue = rootNodes.map(n => n.id);
 
     while (queue.length > 0) {
       const current = queue.shift()!;
