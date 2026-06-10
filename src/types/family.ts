@@ -13,6 +13,7 @@ export interface Person {
   parents: string[]; // Array of Person IDs
   children: string[]; // Array of Person IDs
   spouses: string[]; // Array of Person IDs
+  [key: string]: unknown;
 }
 
 export type PersonNodeData = Person & {

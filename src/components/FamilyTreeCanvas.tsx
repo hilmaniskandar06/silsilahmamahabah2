@@ -12,7 +12,8 @@ import {
   useReactFlow,
   ReactFlowProvider,
   Node,
-  Edge
+  Edge,
+  BackgroundVariant
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Search, Lock, Moon, Download, Focus } from 'lucide-react';
@@ -375,7 +376,7 @@ function FlowCanvas() {
       colorMode={isDarkMode ? 'dark' : 'light'}
       className={isDarkMode ? "bg-gray-900" : "bg-gray-50"}
     >
-      <Background variant="dots" gap={16} size={1} color={isDarkMode ? '#4b5563' : '#cbd5e1'} />
+      <Background variant={BackgroundVariant.Dots} gap={16} size={1} color={isDarkMode ? '#4b5563' : '#cbd5e1'} />
       <Controls />
       <MiniMap />
       
